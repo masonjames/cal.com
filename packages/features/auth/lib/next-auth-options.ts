@@ -12,6 +12,7 @@ import GoogleProvider from "next-auth/providers/google";
 import { updateProfilePhotoGoogle } from "@calcom/app-store/_utils/oauth/updateProfilePhotoGoogle";
 import GoogleCalendarService from "@calcom/app-store/googlecalendar/lib/CalendarService";
 import { LicenseKeySingleton } from "@calcom/ee/common/server/LicenseKeyService";
+import { isSparkaEnabled, validateSparkaSession } from "@calcom/lib/sparka-sso";
 import { CredentialRepository } from "@calcom/features/credentials/repositories/CredentialRepository";
 import createUsersAndConnectToOrg from "@calcom/features/ee/dsync/lib/users/createUsersAndConnectToOrg";
 import ImpersonationProvider from "@calcom/features/ee/impersonation/lib/ImpersonationProvider";
@@ -279,6 +280,90 @@ if (IS_GOOGLE_LOGIN_ENABLED) {
           access_type: "offline",
           prompt: "consent",
         },
+      },
+    })
+  );
+}
+
+// Sparka SSO - Cross-subdomain authentication with chat.masonjames.com
+if (isSparkaEnabled()) {
+  providers.push(
+    CredentialsProvider({
+      id: "sparka-sso",
+      name: "Sparka SSO",
+      type: "credentials",
+      credentials: {
+        // No credentials needed - we validate via cookie
+        sparkaToken: { label: "Sparka Token", type: "hidden" },
+      },
+      async authorize(credentials, req): Promise<User | null> {
+        log.debug("CredentialsProvider:sparka-sso:authorize", safeStringify({ credentials }));
+
+        // Get cookies from the request
+        const cookieHeader = req?.headers?.cookie;
+        if (!cookieHeader) {
+          log.debug("Sparka SSO: No cookie header found");
+          throw new Error(ErrorCode.IncorrectEmailPassword);
+        }
+
+        // Validate the Sparka session
+        const sparkaSession = await validateSparkaSession({
+          cookieHeader,
+          origin: req?.headers?.origin,
+        });
+
+        if (!sparkaSession.authenticated || !sparkaSession.user) {
+          log.debug("Sparka SSO: Session not authenticated", { reason: sparkaSession.reason });
+          throw new Error(ErrorCode.IncorrectEmailPassword);
+        }
+
+        const sparkaUser = sparkaSession.user;
+        log.info("Sparka SSO: Validated session for", { email: sparkaUser.email });
+
+        // Look up or create the user in Cal.com
+        const userRepo = new UserRepository(prisma);
+        let user = await userRepo.findByEmailAndIncludeProfilesAndPassword({
+          email: sparkaUser.email,
+        });
+
+        if (!user) {
+          // Create new user from Sparka session
+          log.info("Sparka SSO: Creating new user from Sparka session", { email: sparkaUser.email });
+
+          const newUser = await prisma.user.create({
+            data: {
+              username: usernameSlug(sparkaUser.name || sparkaUser.email.split("@")[0]),
+              emailVerified: new Date(Date.now()),
+              name: sparkaUser.name || sparkaUser.email.split("@")[0],
+              email: sparkaUser.email,
+              identityProvider: IdentityProvider.GOOGLE, // Sparka uses Google OAuth
+              identityProviderId: sparkaUser.id,
+              ...(sparkaUser.image && { avatarUrl: sparkaUser.image }),
+              creationSource: CreationSource.WEBAPP,
+            },
+          });
+
+          // Re-fetch the user with profiles
+          user = await userRepo.findByEmailAndIncludeProfilesAndPassword({
+            email: sparkaUser.email,
+          });
+
+          if (!user) {
+            log.error("Sparka SSO: Failed to create user");
+            throw new Error(ErrorCode.InternalServerError);
+          }
+        }
+
+        // Check if the user is locked
+        if (user.locked) {
+          throw new Error(ErrorCode.UserAccountLocked);
+        }
+
+        // Check if the user has any active teams
+        const hasActiveTeams = checkIfUserBelongsToActiveTeam(user);
+
+        // Return the user for NextAuth
+        return AdapterUserPresenter.fromCalUser(user, user.role, hasActiveTeams);
       },
     })
   );

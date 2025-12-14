@@ -42,11 +42,19 @@ interface LoginValues {
 const GoogleIcon = () => (
   <img className="text-subtle mr-2 h-4 w-4" src="/google-icon-colored.svg" alt="Continue with Google Icon" />
 );
+
+const SparkaIcon = () => (
+  <svg className="text-subtle mr-2 h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+  </svg>
+);
+
 export type PageProps = inferSSRProps<typeof getServerSideProps>;
 export default function Login({
   csrfToken,
   isGoogleLoginEnabled,
   isSAMLLoginEnabled,
+  isSparkaLoginEnabled,
   samlTenantID,
   samlProductID,
   totpEmail,
@@ -194,6 +202,23 @@ export default function Login({
           {!twoFactorRequired && (
             <>
               <div className="stack-y-3">
+                {isSparkaLoginEnabled && (
+                  <Button
+                    color="primary"
+                    className="w-full justify-center"
+                    disabled={formState.isSubmitting}
+                    data-testid="sparka-sso"
+                    CustomStartIcon={<SparkaIcon />}
+                    onClick={async (e) => {
+                      e.preventDefault();
+                      setLastUsed("sparka");
+                      // Redirect to Sparka SSO callback which validates the cross-domain cookie
+                      window.location.href = `/api/auth/sparka/callback?callbackUrl=${encodeURIComponent(callbackUrl)}`;
+                    }}>
+                    <span>Sign in with Sparka</span>
+                    {lastUsed === "sparka" && <LastUsed />}
+                  </Button>
+                )}
                 {isGoogleLoginEnabled && (
                   <Button
                     color="primary"
@@ -221,7 +246,7 @@ export default function Login({
                   />
                 )}
               </div>
-              {(isGoogleLoginEnabled || displaySSOLogin) && (
+              {(isGoogleLoginEnabled || displaySSOLogin || isSparkaLoginEnabled) && (
                 <div className="my-8">
                   <div className="relative flex items-center">
                     <div className="border-subtle grow border-t" />
