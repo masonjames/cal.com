@@ -7,14 +7,15 @@ import { useEffect, useState } from "react";
 /**
  * Sparka SSO Page
  *
- * This page is reached after the user returns from Sparka login.
- * It automatically triggers the NextAuth sign-in with the sparka-sso provider,
- * which validates the cross-subdomain cookie and creates/links the user.
+ * This page handles Sparka SSO authentication:
+ * 1. Attempts to sign in using the sparka-sso NextAuth provider
+ * 2. If successful, redirects to the callback URL
+ * 3. If no valid Sparka session exists, redirects to Sparka login
  */
 export default function SparkaSSOPage() {
   const searchParams = useSearchParams();
   const callbackUrl = searchParams?.get("callbackUrl") || "/";
-  const [status, setStatus] = useState<"loading" | "error">("loading");
+  const [status, setStatus] = useState<"loading" | "error" | "redirecting">("loading");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -26,8 +27,17 @@ export default function SparkaSSOPage() {
         });
 
         if (result?.error) {
-          setStatus("error");
-          setError(result.error);
+          // Check if the error indicates no Sparka session
+          if (result.error === "CredentialsSignin" || result.error.includes("not authenticated")) {
+            // No valid Sparka session, redirect to Sparka login
+            setStatus("redirecting");
+            const returnTo = `${window.location.origin}/auth/sso/sparka?callbackUrl=${encodeURIComponent(callbackUrl)}`;
+            const sparkaLoginUrl = process.env.NEXT_PUBLIC_SPARKA_LOGIN_URL || "https://chat.masonjames.com/login";
+            window.location.href = `${sparkaLoginUrl}?returnTo=${encodeURIComponent(returnTo)}`;
+          } else {
+            setStatus("error");
+            setError(result.error);
+          }
         } else if (result?.url) {
           // Successful sign-in, redirect to the callback URL
           window.location.href = result.url;
@@ -53,6 +63,17 @@ export default function SparkaSSOPage() {
           >
             Return to Login
           </a>
+        </div>
+      </div>
+    );
+  }
+
+  if (status === "redirecting") {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <div className="text-center">
+          <div className="mx-auto h-12 w-12 animate-spin rounded-full border-4 border-gray-200 border-t-gray-900" />
+          <p className="mt-4 text-gray-600">Redirecting to Sparka login...</p>
         </div>
       </div>
     );

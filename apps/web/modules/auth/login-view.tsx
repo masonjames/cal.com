@@ -212,8 +212,8 @@ export default function Login({
                     onClick={async (e) => {
                       e.preventDefault();
                       setLastUsed("sparka");
-                      // Redirect to Sparka SSO callback which validates the cross-domain cookie
-                      window.location.href = `/api/auth/sparka/callback?callbackUrl=${encodeURIComponent(callbackUrl)}`;
+                      // Redirect to Sparka SSO page which handles session validation
+                      window.location.href = `/auth/sso/sparka?callbackUrl=${encodeURIComponent(callbackUrl)}`;
                     }}>
                     <span>Sign in with Sparka</span>
                     {lastUsed === "sparka" && <LastUsed />}
